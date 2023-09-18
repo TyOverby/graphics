@@ -17,7 +17,7 @@ function resizeCanvas(canvas, gl) {
   canvas.style.height = px(devicePixelsDown / devicePixelRatio);
   canvas.width = pixelsAcross;
   canvas.height = pixelsDown;
-  gl.viewport(0, 0, pixelsAcross, pixelsDown);
+  if (gl) {gl.viewport(0, 0, pixelsAcross, pixelsDown)}
 }
 
 export default function (canvas, gl){

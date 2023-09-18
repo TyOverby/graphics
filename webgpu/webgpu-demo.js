@@ -1,6 +1,13 @@
+import clickndrag from "../common/click-and-drag.js"
+import resizeCanvas from "../common/resize-canvas.js"
+
+let sampleCount = 4;
+
 async function initGpu() {
     /** @type {HTMLCanvasElement} */
     const canvas = document.querySelector("#glcanvas");
+    resizeCanvas(canvas);
+
     const ctx = canvas.getContext("webgpu");
 
     if (!ctx) {
@@ -41,8 +48,16 @@ async function initGpu() {
         size: [canvas.width, canvas.height, 1],
         dimension: '2d',
         format: 'depth24plus-stencil8',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        sampleCount,
     };
+
+    const sampleTexture = device.createTexture({
+      size: [canvas.width, canvas.height],
+      sampleCount,
+      format: gpu.getPreferredCanvasFormat(),
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
 
     const depthTexture = device.createTexture(depthTextureDesc);
     const depthTextureView = depthTexture.createView();
@@ -50,7 +65,7 @@ async function initGpu() {
     const colorTexture = ctx.getCurrentTexture();
     const colorTextureView = colorTexture.createView();
 
-    return { canvas, ctx, gpu, adapter, device, queue, depthTexture, colorTexture, depthTextureView, colorTextureView };
+    return { canvas, ctx, gpu, adapter, device, queue, depthTexture, sampleTexture, colorTexture, depthTextureView, colorTextureView };
 }
 
 function setupBuffers({device}) {
@@ -117,6 +132,7 @@ function setupShaders({device}) {
         struct VSOut {
             @builtin(position) nds_position: vec4<f32>,
             @location(0) color: vec3<f32>,
+            @location(1) orig_pos: vec2<f32>
         };
         
         @vertex
@@ -125,13 +141,15 @@ function setupShaders({device}) {
             var vs_out: VSOut;
             //vs_out.nds_position = vec4<f32>(in_pos, 1.0);
             vs_out.nds_position = uniforms.modelViewProj * vec4<f32>(in_pos, 1.0);
-            vs_out.color = in_color;
+            vs_out.color = uniforms.primaryColor.rgb;
+            vs_out.orig_pos = in_pos.xy;
             return vs_out;
         }`;
+
     const fragmentSource = `
         @fragment
-        fn main(@location(0) in_color: vec3<f32>) -> @location(0) vec4<f32> {
-            return vec4<f32>(in_color, 1.0);
+        fn main(@location(0) in_color: vec3<f32>, @location(1) pos: vec2<f32>) -> @location(0) vec4<f32> {
+            return vec4<f32>(pos.rg, 1.0, 1.0);
         }`;
     
     const vertModule = device.createShaderModule({code : vertexSource});
@@ -221,16 +239,18 @@ function setupPipeline({device, gpu, vertModule, fragModule, uniformBuffer}) {
         vertex,
         fragment,
         primitive,
-        depthStencil
+        depthStencil,
+        multisample: sampleCount != 1 ? { count: sampleCount } : undefined
     };
 
     const pipeline = device.createRenderPipeline(pipelineDesc);
     return {layout, pipeline, uniformBindGroup};
 }
 
-function encodeCommands({device, pipeline, canvas, colorTextureView, depthTextureView, uniformBindGroup, positionBuffer, colorBuffer, indexBuffer, queue}) {
+function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorTextureView, depthTextureView, uniformBindGroup, positionBuffer, colorBuffer, indexBuffer, queue}) {
     let colorAttachment = {
-        view: colorTextureView,
+        view: sampleCount != 1 ? sampleTexture.createView() : colorTextureView,
+        resolveTarget: sampleCount != 1 ? ctx.getCurrentTexture().createView() : undefined,
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
         storeOp: 'store'
@@ -253,7 +273,6 @@ function encodeCommands({device, pipeline, canvas, colorTextureView, depthTextur
 
     const commandEncoder = device.createCommandEncoder();
 
-    // 🖌️ Encode drawing commands
     const passEncoder = commandEncoder.beginRenderPass(renderPassDesc);
     passEncoder.setPipeline(pipeline);
     passEncoder.setViewport(0, 0, canvas.width, canvas.height, 0, 1);
@@ -269,11 +288,43 @@ function encodeCommands({device, pipeline, canvas, colorTextureView, depthTextur
 }
 
 
-function tick({uniformBuffer}){
-    globals.device.queue.writeBuffer(globals.uniformBuffer, 8, new Float32Array([0.5]))
+function tick(globals){
+    const { queue, uniformBuffer, gpu, canvas, x, y, device } = globals;
+    const projectionMatrix = mat4.create();
+    mat4.ortho(projectionMatrix, x - 1.0, x + 1, y - 1.0, y + 1.0, 1, -1);
+
+
+    if (canvas.width != globals.depthTexture.width 
+     || canvas.height != globals.depthTexture.height) {
+        globals.depthTexture.destroy();
+        globals.sampleTexture.destroy();
+
+        const sampleTexture = device.createTexture({
+            size: [canvas.width, canvas.height],
+            sampleCount,
+            format: gpu.getPreferredCanvasFormat(),
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+          })
+
+        const depthTexture = device.createTexture({
+            size: [canvas.width, canvas.height, 1],
+            dimension: '2d',
+            format: 'depth24plus-stencil8',
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+            sampleCount,
+        });
+
+        const depthTextureView = depthTexture.createView();
+        globals.depthTexture = depthTexture;
+        globals.depthTextureView = depthTextureView;
+        globals.sampleTexture = sampleTexture;
+    }
+
+    queue.writeBuffer(uniformBuffer, 0, projectionMatrix)
 }
 
 function render(globals) {
+    tick(globals);
     globals.colorTexture = globals.ctx.getCurrentTexture();
     globals.colorTextureView = globals.colorTexture.createView();
 
@@ -282,7 +333,7 @@ function render(globals) {
 }
 
 async function main() {
-    let globals = {};
+    let globals = {x: 0, y: 0};
     globals = {...globals, ...await initGpu()};
     globals = {...globals, ...setupBuffers(globals)};
     globals = {...globals, ...setupShaders(globals)};
@@ -290,6 +341,11 @@ async function main() {
     render(globals);
     window.globals = globals;
     console.log(globals);
+
+    clickndrag(globals.canvas, function(dx, dy){
+        globals.x += -dx / 100.0;  
+        globals.y += dy / 100.0;
+    })
 }
 
 main();

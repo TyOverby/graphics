@@ -1,7 +1,7 @@
 import { initBuffers } from "./init-buffers.js";
-import { drawScene } from "./draw-scene.js";
+import { drawScene } from "../common/draw-scene.js";
 import clickAndDrag from "./click-and-drag.js";
-import resizeCanvas from "./resize-canvas.js";
+import resizeCanvas from "../common/resize-canvas.js";
 
 const vertex_shader = 
 `#version 300 es
