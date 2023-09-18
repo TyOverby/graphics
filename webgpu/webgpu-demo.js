@@ -287,12 +287,13 @@ function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorText
     queue.submit([commandEncoder.finish()]);
 }
 
+var zoom = 1.0;
 
 function tick(globals){
     const { queue, uniformBuffer, gpu, canvas, x, y, device } = globals;
     const projectionMatrix = mat4.create();
     mat4.ortho(projectionMatrix, x - 1.0, x + 1, y - 1.0, y + 1.0, 1, -1);
-
+    mat4.scale(projectionMatrix, projectionMatrix, vec3.fromValues(zoom,zoom,1.0));
 
     if (canvas.width != globals.depthTexture.width 
      || canvas.height != globals.depthTexture.height) {
@@ -345,7 +346,11 @@ async function main() {
     clickndrag(globals.canvas, function(dx, dy){
         globals.x += -dx / 100.0;  
         globals.y += dy / 100.0;
-    })
+    });
+
+    window.addEventListener('wheel', function(e) {
+        zoom -= e.deltaY / 1000.0;
+    });
 }
 
 main();
