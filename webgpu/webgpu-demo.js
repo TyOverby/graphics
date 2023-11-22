@@ -141,7 +141,8 @@ function setupShaders({device}) {
             var vs_out: VSOut;
             //vs_out.nds_position = vec4<f32>(in_pos, 1.0);
             vs_out.nds_position = uniforms.modelViewProj * vec4<f32>(in_pos, 1.0);
-            vs_out.color = uniforms.primaryColor.rgb;
+            // vs_out.color = uniforms.primaryColor.rgb;
+            vs_out.color = in_color;
             vs_out.orig_pos = in_pos.xy;
             return vs_out;
         }`;
@@ -149,7 +150,8 @@ function setupShaders({device}) {
     const fragmentSource = `
         @fragment
         fn main(@location(0) in_color: vec3<f32>, @location(1) pos: vec2<f32>) -> @location(0) vec4<f32> {
-            return vec4<f32>(pos.rg, 1.0, 1.0);
+            //return vec4<f32>(pos.rg, 1.0, 1.0);
+            return vec4<f32>(in_color, 1.0);
         }`;
     
     const vertModule = device.createShaderModule({code : vertexSource});
@@ -253,6 +255,7 @@ function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorText
         resolveTarget: sampleCount != 1 ? ctx.getCurrentTexture().createView() : undefined,
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
+        //loadOp: 'load',
         storeOp: 'store'
     };
 
