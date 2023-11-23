@@ -126,8 +126,7 @@ function setupShaders({device}) {
             accentColor: vec4<f32>
         };
         
-        @group(0) @binding(0)
-        var<uniform> uniforms: UBO;
+        @group(0) @binding(0) var<uniform> uniforms: UBO;
 
         struct VSOut {
             @builtin(position) nds_position: vec4<f32>,
@@ -161,95 +160,54 @@ function setupShaders({device}) {
 }
 
 function setupPipeline({device, gpu, vertModule, fragModule, uniformBuffer}) {
-    const positionAttribDesc = {
-        shaderLocation: 0, // [[location(0)]]
-        offset: 0,
-        format: 'float32x3'
-    };
-    const colorAttribDesc = {
-        shaderLocation: 1, // [[location(1)]]
-        offset: 0,
-        format: 'float32x3'
-    };
     const positionBufferDesc = {
-        attributes: [positionAttribDesc],
-        arrayStride: 4 * 3, // sizeof(float) * 3
+        attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }],
+        arrayStride: 4 * 3,
         stepMode: 'vertex'
     };
+
     const colorBufferDesc = {
-        attributes: [colorAttribDesc],
-        arrayStride: 4 * 3, // sizeof(float) * 3
+        attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }],
+        arrayStride: 4 * 3,
         stepMode: 'vertex'
-    };
-
-    const depthStencil = {
-        depthWriteEnabled: true,
-        depthCompare: 'less',
-        format: 'depth24plus-stencil8'
-    };
-
-    const uniformBindGroupLayout = device.createBindGroupLayout({
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.VERTEX,
-                buffer: {}
-            }
-        ]
-    });
-
-    const uniformBindGroup = device.createBindGroup({
-        layout: uniformBindGroupLayout,
-        entries: [
-            {
-                binding: 0,
-                resource: {
-                    buffer: uniformBuffer
-                }
-            }
-        ]
-    });
-    
-    
-    const pipelineLayoutDesc = { bindGroupLayouts: [ uniformBindGroupLayout ] };
-    const layout = device.createPipelineLayout(pipelineLayoutDesc);
-
-    const vertex = {
-        module: vertModule,
-        entryPoint: 'main',
-        buffers: [positionBufferDesc, colorBufferDesc]
-    };
-
-    const colorState = {
-        format: gpu.getPreferredCanvasFormat()
-    };
-
-    const fragment = {
-        module: fragModule,
-        entryPoint: 'main',
-        targets: [colorState]
-    };
-
-    const primitive = {
-        frontFace: 'cw',
-        cullMode: 'none',
-        topology: 'triangle-list'
     };
 
     const pipelineDesc = {
-        layout,
-        vertex,
-        fragment,
-        primitive,
-        depthStencil,
+        layout:'auto',
+        vertex: {
+            module: vertModule,
+            entryPoint: 'main',
+            buffers: [positionBufferDesc, colorBufferDesc]
+        },
+        fragment: {
+            module: fragModule,
+            entryPoint: 'main',
+            targets: [{ format: gpu.getPreferredCanvasFormat() }]
+        },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus-stencil8'
+        },
+        primitive: {
+            frontFace: 'cw',
+            cullMode: 'none',
+            topology: 'triangle-list'
+        },
         multisample: sampleCount != 1 ? { count: sampleCount } : undefined
     };
 
     const pipeline = device.createRenderPipeline(pipelineDesc);
-    return {layout, pipeline, uniformBindGroup};
+    let renderBindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: uniformBuffer } }
+        ]
+    });
+    return {pipeline, renderBindGroup};
 }
 
-function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorTextureView, depthTextureView, uniformBindGroup, positionBuffer, colorBuffer, indexBuffer, queue}) {
+function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorTextureView, depthTextureView, renderBindGroup, positionBuffer, colorBuffer, indexBuffer, queue}) {
     let colorAttachment = {
         view: sampleCount != 1 ? sampleTexture.createView() : colorTextureView,
         resolveTarget: sampleCount != 1 ? ctx.getCurrentTexture().createView() : undefined,
@@ -283,7 +241,7 @@ function encodeCommands({device, pipeline, ctx, canvas, sampleTexture, colorText
     passEncoder.setVertexBuffer(0, positionBuffer);
     passEncoder.setVertexBuffer(1, colorBuffer);
     passEncoder.setIndexBuffer(indexBuffer, 'uint16');
-    passEncoder.setBindGroup(0, uniformBindGroup);
+    passEncoder.setBindGroup(0, renderBindGroup);
     passEncoder.drawIndexed(3);
     passEncoder.end();
 
